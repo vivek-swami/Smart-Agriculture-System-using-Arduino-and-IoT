@@ -1,0 +1,160 @@
+/*
+  Smart Agriculture System using Arduino and IoT
+  - Monitors temperature, humidity, light, and soil moisture
+  - Drives fan, grow light, and irrigation pump automatically
+  - Sends SMS alerts via GSM (SIM900A) on soil dry/wet transitions
+  - Displays live status on a 16x2 LCD
+*/
+
+#include <SoftwareSerial.h>
+SoftwareSerial mySerial(6, 7); // RX, TX (GSM module)
+
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(8, 9, 10, 11, 12, 13); // (Rs, E, D4, D5, D6, D7)
+
+#include "DHT.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+#define ONE_WIRE_BUS A3
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+float Celcius = 0;
+
+#define LIGHTSENSOR A1
+#define SOILSENSOR  A2
+#define DHTPIN      A0
+#define DHTTYPE     DHT11
+
+DHT dht(DHTPIN, DHTTYPE);
+int temp, hum, dry;
+
+#define buzzer A5
+#define FAN    6
+#define LIGHT  5
+#define MOTOR  4
+
+void beep() {
+  digitalWrite(buzzer, HIGH);
+  delay(200);
+  digitalWrite(buzzer, LOW);
+  delay(200);
+}
+
+void setup() {
+  lcd.begin(16, 2);
+  Serial.begin(9600);
+  mySerial.begin(9600);
+  dht.begin();
+
+  pinMode(LIGHTSENSOR, INPUT);
+  pinMode(SOILSENSOR, INPUT);
+  pinMode(buzzer, OUTPUT);
+  pinMode(FAN, OUTPUT);
+  pinMode(LIGHT, OUTPUT);
+  pinMode(MOTOR, OUTPUT);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(" GSM Configur..");
+
+  mySerial.println("ATE0");
+  delay(1000);
+  mySerial.println("AT+CMGF=1");
+  delay(500);
+  mySerial.println("AT+CNMI=2,2,0,0,0");
+  delay(500);
+  mySerial.println("AT&W");
+  delay(1000);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(" GREEN- HOUSE");
+  lcd.setCursor(0, 1);
+  lcd.print(" MONITORING");
+  delay(1000);
+
+  beep();
+  beep();
+}
+
+void loop() {
+  // temp = dht.readTemperature();
+  hum = dht.readHumidity();
+  delay(100);
+
+  sensors.requestTemperatures();
+  Celcius = sensors.getTempCByIndex(0);
+  delay(100);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("T :"); lcd.print(Celcius);
+  lcd.setCursor(7, 0);
+  lcd.print(" H :"); lcd.print(hum);
+  delay(1000);
+
+  // --- Fan control based on temperature / humidity ---
+  if (Celcius >= 42 || hum >= 70) {
+    lcd.setCursor(0, 1);
+    lcd.print("F:"); lcd.print(" 1 ");
+    digitalWrite(FAN, HIGH);
+    delay(100);
+  }
+  if (Celcius < 42 && hum < 70) {
+    lcd.setCursor(0, 1);
+    lcd.print("F:"); lcd.print(" 0 ");
+    digitalWrite(FAN, LOW);
+    delay(100);
+  }
+
+  // --- Grow light control based on light sensor ---
+  if (digitalRead(LIGHTSENSOR)) {
+    lcd.setCursor(6, 1);
+    lcd.print("L:"); lcd.print(" 1 ");
+    digitalWrite(LIGHT, HIGH);
+    delay(100);
+  }
+  if (!digitalRead(LIGHTSENSOR)) {
+    lcd.setCursor(6, 1);
+    lcd.print("L:"); lcd.print(" 0 ");
+    digitalWrite(LIGHT, LOW);
+    delay(100);
+  }
+
+  // --- Irrigation pump control based on soil moisture ---
+  if (digitalRead(SOILSENSOR)) {
+    lcd.setCursor(11, 1);
+    lcd.print("M:"); lcd.print(" 1 ");
+    digitalWrite(MOTOR, HIGH);
+    delay(100);
+  }
+  if (!digitalRead(SOILSENSOR)) {
+    lcd.setCursor(11, 1);
+    lcd.print("M:"); lcd.print(" 0 ");
+    digitalWrite(MOTOR, LOW);
+    delay(100);
+  }
+
+  // --- SMS alert: dry soil detected ---
+  if (!digitalRead(SOILSENSOR) && dry == 0) {
+    beep();
+    Serial.print("AT+CMGS=\"+917219880646\"\r");
+    delay(200);
+    Serial.print("DRY SOIL DETECTED");
+    Serial.print("\r\n");
+    Serial.write(26);
+    dry = 1;
+  }
+
+  // --- SMS alert: soil moisture restored ---
+  if (digitalRead(SOILSENSOR) && dry == 1) {
+    beep();
+    Serial.print("AT+CMGS=\"+917219880646\"\r");
+    delay(200);
+    Serial.print("WET SOIL DETECTED");
+    Serial.print("\r\n");
+    Serial.write(26);
+    dry = 0;
+  }
+}
